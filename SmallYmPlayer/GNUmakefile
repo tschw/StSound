@@ -3,6 +3,8 @@
 executable = SmallYmPlayer
 sources = SmallYmPlayer.cpp SoundServerOpenAL.cpp
 
+CXXFLAGS=-std=c++11
+
 uname=$(shell uname)
 
 ifeq ($(uname), Darwin)

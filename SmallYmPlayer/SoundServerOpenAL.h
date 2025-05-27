@@ -18,9 +18,8 @@ class	CSoundServer
 
 		bool	IsRunning();
   private:
-		// undefined, = delete; in C++11+
-		CSoundServer(CSoundServer const &);
-		CSoundServer & operator=(CSoundServer &);
+		CSoundServer(CSoundServer const &) = delete;
+		CSoundServer & operator=(CSoundServer &) = delete;
 };
 
 #endif
