@@ -1,5 +1,3 @@
-#ifdef _WIN32
-
 /*-----------------------------------------------------------------------------
 
 	ST-Sound ( YM files player library )
@@ -36,13 +34,17 @@
 *
 -----------------------------------------------------------------------------*/
 
-#include <windows.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
 #include "SoundServer.h"
+#else
+#include "SoundServerOpenAL.h"
+#endif
 #include "../StSoundLibrary/StSoundLibrary.h"
 
 
@@ -82,6 +84,7 @@ static	endstate_t	do_file(const char* pFileName, bool loop)
 
 	printf("Loading music \"%s\"...\n",pFileName);
 	YMMUSIC *pMusic = ymMusicCreate();
+	s_pMusic = pMusic;			// global instance for soundserver callback
 
 	if (ymMusicLoad(pMusic,pFileName))
 	{
@@ -100,7 +103,6 @@ static	endstate_t	do_file(const char* pFileName, bool loop)
 			signal(SIGINT, &termHandler);
 			ymMusicSetLoopMode(pMusic,loop?YMTRUE:YMFALSE);
 			ymMusicPlay(pMusic);
-			s_pMusic = pMusic;			// global instance for soundserver callback
 
 			int oldSec = -1;
 			bool finished = false;
@@ -115,14 +117,15 @@ static	endstate_t	do_file(const char* pFileName, bool loop)
 				int sec = ymMusicGetPos(pMusic) / 1000;
 				if (sec != oldSec)
 				{
-					printf("Time: %d:%02d\r",sec/60,sec%60);
+					// write to stderr, some platforms buffer stdout without \n
+					fprintf(stderr,"Time: %d:%02d\r",sec/60,sec%60);
 					oldSec = sec;
 				}
 				sleep(1);
 
 				if (!loop && sec == info.musicTimeInSec) finished = true;
 			}
-			printf("\n");
+			fprintf(stderr,"\n");
 
 			// Switch off replayer
 			s_pMusic = NULL;
@@ -132,13 +135,13 @@ static	endstate_t	do_file(const char* pFileName, bool loop)
 		}
 		else
 		{
-			printf("ERROR: Unable to initialize sound card hardware\n");
+			fprintf(stderr,"ERROR: Unable to initialize sound card hardware\n");
 			result = endstate_fatal;
 		}
 	}
 	else
 	{
-		printf("Error in loading file %s:\n%s\n",pFileName,ymMusicGetLastError(pMusic));
+		fprintf(stderr,"Error in loading file %s:\n%s\n",pFileName,ymMusicGetLastError(pMusic));
 		result = endstate_file;
 	}
 
@@ -146,10 +149,6 @@ static	endstate_t	do_file(const char* pFileName, bool loop)
 
 	return result;
 }
-
-
-
-
 
 int main(int argc, char* argv[])
 {
@@ -193,14 +192,3 @@ int main(int argc, char* argv[])
 
 	return 0;
 }
-#else
-
-#include <stdio.h>
-
-int main(int argc, char* argv[])
-{
-	printf(	"SmallYmPlayer only run on Windows, sorry!\n");
-	return 0;
-}
-
-#endif
