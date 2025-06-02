@@ -24,7 +24,7 @@ using callback = std::function< void(int16_t*,size_t) >;
 
 class CSoundServer::body
 {
-	static ALuint const n_buffers = 3;
+	static constexpr int n_buffers = 4;
 
 	ALCcontext*						ptr_context;
 	ALuint							arr_buffers[n_buffers];
@@ -48,7 +48,7 @@ public:
 	body(callback&& func, unsigned ms_latency)
 	  : ptr_context(0l)
 	  , ptr_stream_buffer(0l)
-	  , val_stream_buffer_size(44100*ms_latency/1000)
+	  , val_stream_buffer_size(44100*ms_latency/(1000*n_buffers))
 	  , fnc_stream(func)
 	  , val_ms_latency(ms_latency)
 	  , ptr_thread(0l)
@@ -98,7 +98,7 @@ private:
 			{
 				{	lock l(mtx_sync);
 					using ms = std::chrono::milliseconds;
-					cnd_sync.wait_for(l, ms(val_ms_latency/n_buffers));
+					cnd_sync.wait_for(l, ms(val_ms_latency)/n_buffers);
 				}
 				keep_streaming();
 			}
