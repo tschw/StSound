@@ -1,6 +1,5 @@
 #include "SoundServerOpenAL.h"
 
-#include <stdint.h>
 #include <functional>
 
 #include <thread>
@@ -10,7 +9,6 @@
 #include <mutex>
 #include <condition_variable>
 
-
 #ifdef __APPLE__
 #include <OpenAL/al.h>
 #include <OpenAL/alc.h>
@@ -19,8 +17,18 @@
 #include <AL/alc.h>
 #endif
 
-using lock = std::unique_lock<std::mutex>;
-using callback = std::function< void(int16_t*,size_t) >;
+typedef long sample_count;
+
+namespace
+{
+	constexpr ALenum 		format = AL_FORMAT_MONO16;
+	constexpr sample_count	channels = 1; // mono
+	constexpr int			sample_size = 2; // 16-bit
+	constexpr sample_count 	sample_rate = 44100;
+}
+
+using callback = std::function< void(void*, sample_count) >;
+using lock = std::unique_lock< std::mutex >;
 
 class CSoundServer::body
 {
@@ -30,35 +38,36 @@ class CSoundServer::body
 	ALuint							arr_buffers[n_buffers];
 	ALuint							hnd_source;
 	ALuint							val_index;
-	ALshort*						ptr_stream_buffer;
-	size_t							val_stream_buffer_size;
+	ALbyte*							arr_stream_buffer;
+	ALsizei							val_stream_buffer_size;
 
 	callback						fnc_stream;
-	unsigned						val_ms_latency;
+	std::chrono::nanoseconds		dur_buffer_playback;
 
 	std::thread*					ptr_thread;
 	std::atomic<int> volatile		enm_thread_state;
-	enum thread_state
-			{ birth, life, death };
+	enum thread_state				{ birth, life, death };
 
 	std::mutex						mtx_sync;
 	std::condition_variable			cnd_sync;
 public:
 
-	body(callback&& func, unsigned ms_latency)
+	body(callback&& func, std::chrono::milliseconds&& latency)
 	  : ptr_context(0l)
-	  , ptr_stream_buffer(0l)
-	  , val_stream_buffer_size(44100*ms_latency/(1000*n_buffers))
+	  , arr_stream_buffer(0l)
+	  , val_stream_buffer_size(latency.count() *
+			  sample_rate * channels / (1000 * n_buffers) * sample_size)
 	  , fnc_stream(func)
-	  , val_ms_latency(ms_latency)
+	  , dur_buffer_playback(latency / n_buffers)
 	  , ptr_thread(0l)
 	  , enm_thread_state(birth)
 	{
-		ptr_stream_buffer = new ALshort[val_stream_buffer_size];
+		arr_stream_buffer = new ALbyte[val_stream_buffer_size];
+
 		ptr_thread = new std::thread([this] { this->thread_main(); });
 		{	lock l(mtx_sync);
 			cnd_sync.wait(l,
-					[this] () { return this->enm_thread_state != birth; });
+					[this] { return this->enm_thread_state != birth; });
 		}
 	}
 
@@ -72,7 +81,7 @@ public:
 		ptr_thread->join();
 
 		delete ptr_thread;
-		delete[] ptr_stream_buffer;
+		delete[] arr_stream_buffer;
 	}
 
 	bool is_running() const
@@ -81,6 +90,7 @@ public:
 	}
 
 private:
+
 	void thread_main()
 	{
 		bool ok = init_al();
@@ -96,11 +106,11 @@ private:
 
 			while (enm_thread_state == life)
 			{
-				{	lock l(mtx_sync);
-					using ms = std::chrono::milliseconds;
-					cnd_sync.wait_for(l, ms(val_ms_latency)/n_buffers);
-				}
 				keep_streaming();
+
+				{	lock l(mtx_sync);
+					cnd_sync.wait_for(l, dur_buffer_playback);
+				}
 			}
 		}
 		close_al();
@@ -121,7 +131,7 @@ private:
 
 		alGetError();
 
-		alGenBuffers(sizeof(arr_buffers)/sizeof(ALuint), arr_buffers);
+		alGenBuffers(n_buffers, arr_buffers);
 		if(alGetError() != AL_NO_ERROR) return false;
 
 		alGenSources(1, & hnd_source);
@@ -135,7 +145,7 @@ private:
 	{
 		if (!ptr_context) return;
 		alDeleteSources(1, & hnd_source);
-		alDeleteBuffers(sizeof(arr_buffers)/sizeof(ALuint), arr_buffers);
+		alDeleteBuffers(n_buffers, arr_buffers);
 		ALCdevice * device = alcGetContextsDevice(ptr_context);
 		alcDestroyContext(ptr_context);
 		alcCloseDevice(device);
@@ -145,16 +155,16 @@ private:
 	{
 		for (ALuint j = first, je = first+n; j < je; ++j)
 		{
-			fnc_stream(ptr_stream_buffer,val_stream_buffer_size);
+			fnc_stream(arr_stream_buffer, val_stream_buffer_size);
 
-			alBufferData(arr_buffers[j], AL_FORMAT_MONO16,
-					ptr_stream_buffer, val_stream_buffer_size*2, 44100);
+			alBufferData(arr_buffers[j], format,
+					arr_stream_buffer, val_stream_buffer_size, sample_rate);
 		}
 	}
 
 	void start_streaming()
 	{
-		fill_buffers(0,n_buffers);
+		fill_buffers(0, n_buffers);
 		alSourceQueueBuffers(hnd_source, n_buffers, &arr_buffers[0]);
 		alSourcef(hnd_source, AL_GAIN, 1.0f);
 		alListenerf(AL_GAIN, 1.0f);
@@ -188,11 +198,11 @@ CSoundServer::CSoundServer()
 {
 }
 
-bool CSoundServer::open(USER_CALLBACK pUserCallback,long bufferedMilliseconds)
+bool CSoundServer::open(USER_CALLBACK pUserCallback, long bufferedMilliseconds)
 {
 	if (! m_pBody)
-		m_pBody = new body([pUserCallback](int16_t* d,size_t n) {
-					(*pUserCallback)((int16_t*)d,n*2); }, bufferedMilliseconds);
+		m_pBody = new body(*pUserCallback,
+				std::chrono::milliseconds(bufferedMilliseconds));
 	return IsRunning();
 }
 

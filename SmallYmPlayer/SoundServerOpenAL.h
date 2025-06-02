@@ -5,7 +5,7 @@ typedef void (*USER_CALLBACK) (void *pBuffer,long bufferLen);
 
 class	CSoundServer
 {
-		struct body; body * m_pBody;
+		class body; body* m_pBody;
   public:
 
 		CSoundServer();
